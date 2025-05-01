@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>USD/KRW 환율 추적기</title>
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      text-align: center;
+      background-color: #f4f4f4;
+    }
+    #chart {
+      max-width: 1200px;
+      margin: 30px auto;
+    }
+    #rate { font-size: 24px; margin: 10px; color: green; }
+    #lastUpdated { font-size: 14px; color: #555; }
+    .dark-theme {
+      background-color: #121212;
+      color: white;
+    }
+    .dark-theme #chart {
+      background-color: #1e1e1e;
+    }
+    #rangeText {
+      margin-top: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>USD/KRW 실시간 환율</h1>
+
+  <div id="rate">로딩 중...</div>
+  <div id="lastUpdated">마지막 업데이트: -</div>
+  <div id="rangeText"></div>
+  <div id="chart"></div>
+
+  <script>
+    const apiKey = "c2dc48def2344e0c85a9ebe6f55bd034";
+    const symbol = "USD/KRW";
+    let interval = "1min";
+    let fetchTimer = null;
+    let allData = JSON.parse(localStorage.getItem("usdkrw_data") || '[]');
+    let theme = localStorage.getItem("theme") || "light";
+
+    function getFilteredData() {
+      return allData.filter(d => d.interval === interval);
+    }
+
+    const chartOptions = {
+      chart: {
+        type: 'line',
+        height: 400,
+        animations: { enabled: true, easing: 'easeinout', speed: 300 },
+        toolbar: { show: false },
+        background: theme === "dark" ? "#1e1e1e" : "#fff"
+      },
+      series: [{ name: "USD → KRW", data: [] }],
+      xaxis: {
+        categories: [],
+        title: { text: '시간' },
+        labels: {
+          rotate: -45,
+          formatter: val => val
+        }
+      },
+      yaxis: {
+        opposite: true,
+        title: { text: '환율 (KRW)' },
+        labels: { formatter: val => val.toFixed(2) }
+      },
+      tooltip: {
+        x: { format: 'HH:mm:ss' },
+        y: { formatter: val => `${val.toFixed(2)} KRW` }
+      },
+      annotations: { points: [] },
+      theme: { mode: theme === "dark" ? "dark" : "light" }
+    };
+
+    const chart = new ApexCharts(document.querySelector("#chart"), chartOptions);
+    chart.render();
+
+    function updateChart() {
+      const currentData = getFilteredData();
+      const labels = currentData.map(d => new Date(d.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      const rates = currentData.map(d => d.rate);
+      const max = Math.max(...rates);
+      const min = Math.min(...rates);
+      const maxIndex = rates.indexOf(max);
+      const minIndex = rates.indexOf(min);
+      const latest = rates[rates.length - 1];
+      const latestLabel = labels[labels.length - 1];
+
+      chart.updateOptions({
+        xaxis: { categories: labels },
+        series: [{ data: rates }],
+        annotations: {
+          points: [
+            {
+              x: labels[maxIndex], y: max,
+              marker: { size: 5, fillColor: '#00E396' },
+              label: {
+                borderColor: '#00E396', offsetX: -60,
+                style: { color: '#fff', background: '#00E396' },
+                text: `최고: ${max.toFixed(2)} KRW`
+              }
+            },
+            {
+              x: labels[minIndex], y: min,
+              marker: { size: 5, fillColor: '#FF4560' },
+              label: {
+                borderColor: '#FF4560', offsetX: -60,
+                style: { color: '#fff', background: '#FF4560' },
+                text: `최저: ${min.toFixed(2)} KRW`
+              }
+            },
+            {
+              x: latestLabel, y: latest,
+              marker: { size: 5, fillColor: '#775DD0' },
+              label: {
+                borderColor: '#775DD0', offsetX: -60,
+                style: { color: '#fff', background: '#775DD0' },
+                text: `현재: ${latest.toFixed(2)} KRW`
+              }
+            }
+          ]
+        }
+      });
+
+      updateRangeText(rates);
+    }
+
+    function updateRangeText(rates) {
+      if (rates.length < 1) return;
+      const min = Math.min(...rates);
+      const max = Math.max(...rates);
+      document.getElementById("rangeText").innerText = `범위: 최소 ${min.toFixed(2)} KRW ~ 최대 ${max.toFixed(2)} KRW`;
+    }
+
+    function saveDataToLocal() {
+      localStorage.setItem("usdkrw_data", JSON.stringify(allData));
+    }
+
+    async function fetchRate() {
+      try {
+        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${interval}&outputsize=1&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.values && data.values.length > 0) {
+          const { datetime: time, close } = data.values[0];
+          const localTime = new Date(time).toLocaleString();
+          const rate = parseFloat(close);
+          if (!allData.some(d => d.time === time && d.interval === interval)) {
+            allData.push({ time, rate, interval });
+            saveDataToLocal();
+            updateChart();
+          }
+          document.getElementById("rate").innerText = `현재 환율: ${rate.toFixed(2)} KRW`;
+          document.getElementById("lastUpdated").innerText = `마지막 업데이트: ${localTime}`;
+        }
+      } catch (e) {
+        console.error("데이터 수신 실패:", e);
+      }
+    }
+
+    function applyTheme() {
+      if (theme === "dark") {
+        document.body.classList.add("dark-theme");
+      }
+    }
+
+    function startFetching() {
+      clearInterval(fetchTimer);
+      updateChart();
+      fetchRate();
+      fetchTimer = setInterval(fetchRate, 60000); // 1분 간격 자동 갱신
+    }
+
+    applyTheme();
+    allData = JSON.parse(localStorage.getItem("usdkrw_data") || '[]');
+    startFetching();
+  </script>
+</body>
+</html>
