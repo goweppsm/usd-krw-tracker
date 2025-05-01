@@ -87,6 +87,8 @@
       const currentData = getFilteredData();
       const labels = currentData.map(d => new Date(d.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       const rates = currentData.map(d => d.rate);
+      if(rates.length === 0) return; // 빈 배열이면 차트 업데이트 안함
+      
       const max = Math.max(...rates);
       const min = Math.min(...rates);
       const maxIndex = rates.indexOf(max);
